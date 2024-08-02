@@ -1,0 +1,99 @@
+function notifyLine() {
+  const LINE_NOTIFY_TOKEN = 'xxx';
+  const ALPHA_VANTAGE_API_KEY = 'xxx';
+  const QUANDL_API_KEY = 'xxx';
+
+  const symbols = [
+    { name: 'ダウ平均', symbol: 'DJI' },
+    { name: 'S&P 500', symbol: 'SPX' },
+    { name: 'S&P 500 先物', symbol: 'ES' },
+    { name: 'ダウ先物', symbol: 'YM' },
+    { name: '日本国債', symbol: 'JP10Y' },
+    { name: '米国債', symbol: 'US10Y' },
+    { name: '金価格', symbol: 'XAUUSD' },
+  ];
+
+  let message = '本日と前日比\n';
+
+  symbols.forEach(function(symbol) {
+    const data = fetchData(symbol.symbol, ALPHA_VANTAGE_API_KEY);
+    if (data) {
+      const price = data['price'];
+      const change = data['change'];
+      const percentChange = data['percentChange'];
+      message += `・${symbol.name}[価格]: ${price}, 前日比: ${change} (${percentChange}%)\n`;
+    }
+  });
+
+  const japanBondData = fetchQuandlData('MOFJ/INTEREST_RATE_JP10Y', QUANDL_API_KEY);
+  const usBondData = fetchQuandlData('USTREASURY/YIELD', QUANDL_API_KEY);
+
+  if (japanBondData) {
+    message += `・日本国債[価格]: ${japanBondData.price}, 利回り: ${japanBondData.yield}\n`;
+  }
+  if (usBondData) {
+    message += `・米国債[価格]: ${usBondData.price}, 利回り: ${usBondData.yield}\n`;
+  }
+
+  sendLineNotify(LINE_NOTIFY_TOKEN, message);
+}
+
+function fetchData(symbol, apiKey) {
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${symbol}&apikey=${apiKey}`;
+  const response = UrlFetchApp.fetch(url);
+  const data = JSON.parse(response.getContentText());
+
+  const timeSeries = data['Time Series (Daily)'];
+  const today = new Date().toISOString().split('T')[0];
+  const yesterday = new Date(Date.now() - 864e5).toISOString().split('T')[0];
+
+  if (timeSeries[today] && timeSeries[yesterday]) {
+    const todayData = timeSeries[today];
+    const yesterdayData = timeSeries[yesterday];
+
+    const price = parseFloat(todayData['4. close']);
+    const prevPrice = parseFloat(yesterdayData['4. close']);
+    const change = price - prevPrice;
+    const percentChange = (change / prevPrice) * 100;
+
+    return {
+      price: price.toFixed(2),
+      change: change.toFixed(2),
+      percentChange: percentChange.toFixed(2)
+    };
+  }
+  return null;
+}
+
+function fetchQuandlData(datasetCode, apiKey) {
+  const url = `https://www.quandl.com/api/v3/datasets/${datasetCode}/data.json?api_key=${apiKey}`;
+  const response = UrlFetchApp.fetch(url);
+  const data = JSON.parse(response.getContentText());
+  const rows = data.dataset_data.data;
+
+  if (rows && rows.length > 0) {
+    const latestData = rows[0];
+    const price = latestData[1];
+    const yield = latestData[2];
+
+    return {
+      price: price,
+      yield: yield
+    };
+  }
+  return null;
+}
+
+function sendLineNotify(token, message) {
+  const url = 'https://notify-api.line.me/api/notify';
+  const options = {
+    method: 'post',
+    payload: {
+      message: message
+    },
+    headers: {
+      'Authorization': 'Bearer ' + token
+    }
+  };
+  UrlFetchApp.fetch(url, options);
+}
